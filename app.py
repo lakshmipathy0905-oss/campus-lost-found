@@ -12,11 +12,15 @@ from supabase import create_client, Client
 # These should be set as Environment Variables in Vercel/Production
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") # NEW: For bypassing email verification
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     # Fallback for local dev if needed, but in production these MUST be set
     print("Warning: SUPABASE_URL or SUPABASE_KEY not set. Check environment variables.")
 
+# Initialize Clients
+_supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+_supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else None
 
 
 app = FastAPI(title="Campus Lost & Found")
@@ -826,18 +830,26 @@ HTML_PAGE = """
             }
 
             if (authMode === 'signup') {
-                const { data, error } = await _supabase.auth.signUp({ email, password });
-                if (error) {
-                    if (error.message.includes('Email not confirmed')) {
-                        showToast('Please check your college email to verify your account. (Or ask Admin to confirm you manually!)', 'error');
-                    } else {
-                        showToast(error.message, 'error');
-                    }
-                    return;
+                // Use our new backend endpoint to bypass email verification
+                const response = await fetch('/api/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    return showToast(result.error || 'Signup failed', "error");
                 }
-                document.getElementById('auth-main-view').style.display = 'none';
-                document.getElementById('auth-message-view').style.display = 'block';
-                document.getElementById('auth-message-text').innerText = "We've sent a verification link to your college email. Please verify to continue.";
+                
+                // If signup success, instantly log them in
+                const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+                if (error) return showToast(error.message, "error");
+                
+                showToast("Account created! Logging you in...", "success");
+                checkUser();
+                return;
             } else {
                 const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
                 if (error) return showToast(error.message, "error");
@@ -1098,6 +1110,27 @@ HTML_PAGE = """
 </body>
 </html>
 """
+
+# --- AUTH ENDPOINTS ---
+@app.post("/api/auth/signup")
+async def admin_signup(request: Request):
+    if not _supabase_admin:
+        return JSONResponse({"error": "Admin client not configured"}, status_code=500)
+    
+    body = await request.json()
+    email = body.get("email")
+    password = body.get("password")
+
+    try:
+        # Create user and automatically confirm them
+        res = _supabase_admin.auth.admin.create_user({
+            "email": email,
+            "password": password,
+            "email_confirm": True
+        })
+        return JSONResponse({"message": "User created and confirmed successfully!"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():

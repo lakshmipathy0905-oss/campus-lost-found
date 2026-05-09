@@ -671,14 +671,10 @@ HTML_PAGE = """
                 <p class="forgot-link" onclick="handleForgotPassword()">Forgot Password?</p>
             </div>
 
-
-            <div id="auth-message-view" style="display: none;">
-                <h3 id="auth-message-title">Check your email</h3>
-                <p id="auth-message-text" style="color: var(--text-muted); margin: 1rem 0;"></p>
-                <button class="btn-resolve" onclick="window.location.reload()">Back to Login</button>
             </div>
         </div>
     </div>
+
 
     <div id="app-content">
         <nav>
@@ -1122,15 +1118,27 @@ async def admin_signup(request: Request):
     password = body.get("password")
 
     try:
-        # Create user and automatically confirm them
-        res = _supabase_admin.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "email_confirm": True
-        })
-        return JSONResponse({"message": "User created and confirmed successfully!"})
+        # 1. Try to create user and automatically confirm them
+        try:
+            res = _supabase_admin.auth.admin.create_user({
+                "email": email,
+                "password": password,
+                "email_confirm": True
+            })
+            return JSONResponse({"message": "User created and confirmed successfully!"})
+        except Exception as e:
+            # 2. If user already exists, manually confirm them
+            if "already registered" in str(e).lower() or "already exists" in str(e).lower():
+                # Get user ID by email
+                users_res = _supabase_admin.auth.admin.list_users()
+                target_user = next((u for u in users_res if u.email == email), None)
+                if target_user:
+                    _supabase_admin.auth.admin.update_user_by_id(target_user.id, {"email_confirm": True})
+                    return JSONResponse({"message": "Existing user confirmed successfully!"})
+            raise e
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():

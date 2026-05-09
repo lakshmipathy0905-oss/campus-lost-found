@@ -827,8 +827,14 @@ HTML_PAGE = """
 
             if (authMode === 'signup') {
                 const { data, error } = await _supabase.auth.signUp({ email, password });
-                if (error) return showToast(error.message, "error");
-                
+                if (error) {
+                    if (error.message.includes('Email not confirmed')) {
+                        showToast('Please check your college email to verify your account. (Or ask Admin to confirm you manually!)', 'error');
+                    } else {
+                        showToast(error.message, 'error');
+                    }
+                    return;
+                }
                 document.getElementById('auth-main-view').style.display = 'none';
                 document.getElementById('auth-message-view').style.display = 'block';
                 document.getElementById('auth-message-text').innerText = "We've sent a verification link to your college email. Please verify to continue.";
